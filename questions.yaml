@@ -1,0 +1,21 @@
+# Default questionnaire (edit freely). Questions are ordered.
+# Types: free, single, multi, scale (1-5), number
+questions:
+  - id: Q1
+    text: "Overall, how satisfied are you with your life these days? (1=Not at all, 5=Very)"
+    type: scale
+  - id: Q2
+    text: "Which of the following policy areas is your top priority for your country right now?"
+    type: single
+    options: ["Economy/Jobs", "Healthcare", "Education", "National security", "Climate/Environment", "Corruption/Integrity"]
+  - id: Q3
+    text: "In the last 12 months, how many times did you travel abroad?"
+    type: single
+    options: ["0", "1-2", "3-4", "5+"]
+  - id: Q4
+    text: "Do you support increasing taxes on the highest earners to fund public services?"
+    type: single
+    options: ["Strongly oppose", "Oppose", "Neutral/Unsure", "Support", "Strongly support"]
+  - id: Q5
+    text: "Write one short sentence about your biggest concern for the next year."
+    type: free
