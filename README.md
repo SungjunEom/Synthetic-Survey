@@ -11,7 +11,7 @@ This tiny project runs a **synthetic survey** by asking OpenAI's models to role�
 - Keeps your API key **in a separate file** (`api_key.txt`) or reads `OPENAI_API_KEY` from env.
 - Extra niceties: deterministic `--seed`, retry/backoff, strict JSON responses, and schema validation.
 
-> ⚠️ You’re responsible for checking that creating synthetic datasets is acceptable for your use case. These answers come from a model, not real people.
+> ⚠️ You’re responsible for checking that creating synthetic datasets is acceptable for your use case. These answers come from a model, not real people. The results doesn't represent the human population in any case. Please refer to: *"Synthetic Replacements for Human Survey Data? The Perils of Large Language Models"* by Bisbee, et al.
 
 ## Install & run
 
