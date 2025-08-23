@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import argparse, os, json, random, time, sys, csv, uuid, datetime, pathlib
+import argparse, os, json, random, time, sys, csv, uuid, datetime, pathlib, re
 from dataclasses import dataclass, asdict
 from typing import List, Dict, Any, Optional
 from tqdm import tqdm
@@ -132,9 +132,9 @@ def random_persona(seed: Optional[int]=None, nationality: Optional[str]=None, po
 
 def build_system_prompt() -> str:
     return (
-        "You are a *single* survey respondent. Answer **only as the persona provided**.\n"
-        "Be brief, realistic, and consistent with the persona traits (age, education, politics, nationality).\n"
-        "If a question is irrelevant to the persona or country context, answer 'N/A' briefly.\n"
+        "You are a *single* survey respondent. Answer **only as the persona provided**."
+        "Be brief, realistic, and consistent with the persona traits (age, education, politics, nationality)."
+        "If a question is irrelevant to the persona or country context, answer 'N/A' briefly."
         "Return *only* valid JSON; do not include extra commentary."
     )
 
@@ -149,18 +149,18 @@ def build_user_prompt(persona: Persona, questions: List[Dict[str, Any]], answer_
         f"Political opinion: {persona.politics or 'N/A'}",
     ]
     guidelines = (
-        "Answer the following questionnaire as this persona.\n"
-        "Where options are provided, pick exactly one for 'single', allow multiple (<=3) for 'multi'.\n"
-        "For 'scale', answer an integer from 1 to 5. For 'number', return a number.\n"
+        "Answer the following questionnaire as this persona."
+        "Where options are provided, pick exactly one for 'single', allow multiple (<=3) for 'multi'."
+        "For 'scale', answer an integer from 1 to 5. For 'number', return a number."
         "Keep free-text answers to one short sentence."
     )
     # Create a minimal self-contained instruction for JSON shape
     schema_hint = (
-        "Output JSON with this shape:\n"
-        "{\n"
-        '  "respondent": { "mbti": "...", "age": 0, "sex": "...", "nationality": "...", "education": "...", "politics": "..." },\n'
-        '  "answers": [ {"id": "Q1", "question": "...", "answer": <string|number|array> }, ... ]\n'
-        "}\n"
+        "Output JSON with this shape:"
+        "{"
+        '  "respondent": { "mbti": "...", "age": 0, "sex": "...", "nationality": "...", "education": "...", "politics": "..." },'
+        '  "answers": [ {"id": "Q1", "question": "...", "answer": <string|number|array> }, ... ]'
+        "}"
         "Ensure the 'respondent' object **matches exactly** the persona above."
     )
     lines = [
@@ -178,7 +178,7 @@ def build_user_prompt(persona: Persona, questions: List[Dict[str, Any]], answer_
         if q.get("options"):
             opt = f" Options: {q['options']}"
         lines.append(f"- {q['id']} ({q['type']}): {q['text']}{opt}")
-    return "\n".join(lines)
+    return "".join(lines)
 
 def call_model(client: OpenAI, model: str, persona: Persona, questions: List[Dict[str, Any]], temperature: float=0.8, seed: Optional[int]=None, max_tokens: int=800) -> Dict[str, Any]:
     system_prompt = build_system_prompt()
@@ -229,6 +229,31 @@ def coerce_answers(raw_json: Dict[str, Any], questions: List[Dict[str, Any]]) ->
         answers.append(QA(id=qid, question=question_text, answer=ans))
     return answers
 
+def pick_age(spec: Optional[str], rnd: random.Random, default_min: int = 18, default_max: int = 90) -> int:
+    """Parse --age which can be a single int ('30') or a range '25-40'.
+    Returns a sampled age within [default_min, default_max].
+    """
+    if spec is None:
+        # Original default behavior was ~18-80; we'll keep a broad default within validation bounds.
+        return rnd.randint(default_min, 80)
+    s = str(spec).strip()
+    # Single integer
+    if s.isdigit():
+        val = int(s)
+        if val < default_min or val > default_max:
+            raise ValueError(f"--age must be between {default_min}-{default_max}")
+        return val
+    # Range MIN-MAX
+    m = re.match(r'^(\d+)\s*-\s*(\d+)$', s)
+    if m:
+        lo, hi = sorted([int(m.group(1)), int(m.group(2))])
+        lo = max(lo, default_min)
+        hi = min(hi, default_max)
+        if lo > hi:
+            raise ValueError(f"Invalid --age range after clamping: {lo}-{hi}")
+        return rnd.randint(lo, hi)
+    raise ValueError('Invalid --age format. Use a single integer like "30" or a range like "25-40".')
+
 def main():
     parser = argparse.ArgumentParser(description="Run a synthetic survey via OpenAI's Chat Completions API.")
     parser.add_argument("--questions-file", default="questions.yaml", help="YAML or JSON file with a 'questions' list.")
@@ -239,7 +264,7 @@ def main():
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility.")
     # Manual persona overrides
     parser.add_argument("--mbti")
-    parser.add_argument("--age", type=int)
+    parser.add_argument("--age", type=str, help="Age or range MIN-MAX (e.g., 25-40). You can still pass a single integer.")
     parser.add_argument("--sex", choices=SEX_CHOICES)
     parser.add_argument("--nationality")
     parser.add_argument("--education", choices=EDU_CHOICES)
@@ -267,11 +292,15 @@ def main():
     out_dir.mkdir(exist_ok=True)
 
     results: List[SurveyResult] = []
-    jsonl_path = out_dir / f"results_{int(time.time())}.jsonl"
-    csv_path = out_dir / f"results_{int(time.time())}.csv"
+    ts = int(time.time())
+    jsonl_path = out_dir / f"results_{ts}.jsonl"
+    csv_path = out_dir / f"results_{ts}.csv"
 
     with open(jsonl_path, "w", encoding="utf-8") as jf:
         for i in tqdm(range(args.n), desc="Surveying"):
+            # Determine age for this respondent (range or single int)
+            age_for_resp = pick_age(args.age, rnd)
+
             # Persona handling
             if args.randomize:
                 pers = random_persona(
@@ -279,7 +308,7 @@ def main():
                     nationality=args.nationality,
                     politics=args.politics,
                     mbti=args.mbti,
-                    age=args.age,
+                    age=age_for_resp,
                     sex=args.sex,
                     education=args.education
                 )
@@ -290,7 +319,7 @@ def main():
                     nationality=args.nationality,
                     politics=args.politics,
                     mbti=args.mbti,
-                    age=args.age,
+                    age=age_for_resp,
                     sex=args.sex,
                     education=args.education
                 )
@@ -308,8 +337,6 @@ def main():
 
             # Validate/coerce
             try:
-                respondent = raw.get("respondent", {})
-                # Ensure the model echoed the persona correctly; override if needed
                 respondent = {
                     "mbti": pers.mbti,
                     "age": pers.age,
@@ -330,7 +357,7 @@ def main():
                 continue
 
             # Persist JSONL row
-            jf.write(json.dumps(survey_res.model_dump(), ensure_ascii=False) + "\n")
+            jf.write(json.dumps(survey_res.model_dump(), ensure_ascii=False) + "")
             results.append(survey_res)
 
     # Build CSV
@@ -341,13 +368,13 @@ def main():
     def count_col(col):
         return df[[col]].value_counts().reset_index(name="count")
 
-    print("\n--- Summary ---")
+    print("--- Summary ---")
     if not df.empty:
         for col in ["nationality", "politics", "mbti", "education", "sex"]:
             vc = count_col(col).head(10)
-            print(f"\n{col} (top 10):")
+            print(f"{col} (top 10):")
             print(vc.to_string(index=False))
-        print(f"\nSaved {len(results)} respondents to:")
+        print(f"Saved {len(results)} respondents to:")
         print(f"  JSONL: {jsonl_path}")
         print(f"  CSV:   {csv_path}")
     else:

@@ -33,6 +33,9 @@ python synthetic_survey.py --n 5 \
   --nationality "United States" --education "Bachelor's" \
   --politics Democrat
 
+# Age range
+python synthetic_survey.py --n 50 --randomize --age 25-40
+
 # Mix: set some, randomize the rest
 python synthetic_survey.py --n 20 --randomize --nationality "South Korea" --politics 진보
 
