@@ -41,6 +41,9 @@ python synthetic_survey.py --n 20 --randomize --nationality "South Korea" --poli
 
 # Use your own questionnaire file (YAML or JSON)
 python synthetic_survey.py --n 30 --questions-file my_questions.yaml
+
+# 한국어 프롬프트
+python3 survey.py --n 5 --questions-file questions.yaml --lang ko
 ```
 
 Outputs are written to `./out/` as timestamped `csv` and `jsonl` files.

@@ -138,8 +138,66 @@ def build_system_prompt() -> str:
         "Return *only* valid JSON; do not include extra commentary."
     )
 
-def build_user_prompt(persona: Persona, questions: List[Dict[str, Any]], answer_language: Optional[str]=None) -> str:
-    # We let the model respond in the language of the question text by default.
+# --------------------------- Prompts (EN/KO) ---------------------------
+
+def build_system_prompt(lang: str = "en") -> str:
+    if lang.lower() == "ko":
+        return (
+            "당신은 *단 한 명의* 설문 응답자입니다. 반드시 **제공된 페르소나로만** 답하세요."
+            "페르소나 특성(나이, 학력, 정치 성향, 국적)에 맞게 간결하고 현실적으로 답변하세요."
+            "질문이 페르소나나 해당 국가 맥락과 무관하면 'N/A'로 짧게 답하세요."
+            "반드시 *유효한 JSON만* 반환하고, 추가 설명/코멘트는 포함하지 마세요."
+        )
+    # default: English
+    return (
+        "You are a *single* survey respondent. Answer **only as the persona provided**."
+        "Be brief, realistic, and consistent with the persona traits (age, education, politics, nationality)."
+        "If a question is irrelevant to the persona or country context, answer 'N/A' briefly."
+        "Return *only* valid JSON; do not include extra commentary."
+    )
+
+def build_user_prompt(persona: Persona, questions: List[Dict[str, Any]],
+                      answer_language: Optional[str]=None, lang: str = "en") -> str:
+    if lang.lower() == "ko":
+        persona_lines = [
+            f"MBTI: {persona.mbti}",
+            f"나이: {persona.age}",
+            f"성별: {persona.sex}",
+            f"국적: {persona.nationality}",
+            f"학력: {persona.education}",
+            f"정치 성향: {persona.politics or 'N/A'}",
+        ]
+        guidelines = (
+            "아래 설문지를 위 페르소나로서 답하세요."
+            "선택지가 있는 문항은 'single'이면 **하나만**, 'multi'이면 **여러 개(최대 3개)** 선택하세요."
+            "'scale'은 1~5의 **정수**로, 'number'는 **숫자**로 답하세요."
+            "서술형 문항은 **한 문장으로 짧게** 답하세요."
+        )
+        schema_hint = (
+            "다음 JSON 형식으로 출력하세요:"
+            "{"
+            '  "respondent": { "mbti": "...", "age": 0, "sex": "...", "nationality": "...", "education": "...", "politics": "..." },'
+            '  "answers": [ {"id": "Q1", "question": "...", "answer": <string|number|array> }, ... ]'
+            "}"
+            "'respondent' 객체는 **위 페르소나와 정확히 일치**해야 합니다."
+        )
+        lines = [
+            "페르소나:",
+            *persona_lines,
+            "",
+            guidelines,
+            "",
+            schema_hint,
+            "",
+            "질문:"
+        ]
+        out = []
+        for q in questions:
+            opt = f" 선택지: {q['options']}" if q.get("options") else ""
+            out.append(f"- {q['id']} ({q['type']}): {q['text']}{opt}")
+        return "\n".join(lines + out)
+
+    # default: English
     persona_lines = [
         f"MBTI: {persona.mbti}",
         f"Age: {persona.age}",
@@ -154,7 +212,6 @@ def build_user_prompt(persona: Persona, questions: List[Dict[str, Any]], answer_
         "For 'scale', answer an integer from 1 to 5. For 'number', return a number."
         "Keep free-text answers to one short sentence."
     )
-    # Create a minimal self-contained instruction for JSON shape
     schema_hint = (
         "Output JSON with this shape:"
         "{"
@@ -173,18 +230,21 @@ def build_user_prompt(persona: Persona, questions: List[Dict[str, Any]], answer_
         "",
         "Questions:"
     ]
+    out = []
     for q in questions:
         opt = ""
         if q.get("options"):
             opt = f" Options: {q['options']}"
-        lines.append(f"- {q['id']} ({q['type']}): {q['text']}{opt}")
-    return "".join(lines)
+        out.append(f"- {q['id']} ({q['type']}): {q['text']}{opt}")
+    return "\n".join(lines + out)
 
-def call_model(client: OpenAI, model: str, persona: Persona, questions: List[Dict[str, Any]], temperature: float=0.8, seed: Optional[int]=None, max_tokens: int=800) -> Dict[str, Any]:
-    system_prompt = build_system_prompt()
-    user_prompt = build_user_prompt(persona, questions)
 
-    # We request strict JSON output using Chat Completions + response_format
+def call_model(client: OpenAI, model: str, persona: Persona, questions: List[Dict[str, Any]],
+               temperature: float=0.8, seed: Optional[int]=None, max_tokens: int=800,
+               lang: str = "en") -> Dict[str, Any]:
+    system_prompt = build_system_prompt(lang=lang)
+    user_prompt = build_user_prompt(persona, questions, lang=lang)
+
     resp = client.chat.completions.create(
         model=model,
         messages=[
@@ -198,6 +258,7 @@ def call_model(client: OpenAI, model: str, persona: Persona, questions: List[Dic
     )
     content = resp.choices[0].message.content
     return json.loads(content)
+
 
 def summarize_to_dataframe(results: List[SurveyResult]) -> pd.DataFrame:
     # Flatten into rows per answer
@@ -271,6 +332,7 @@ def main():
     parser.add_argument("--politics")
     parser.add_argument("--temperature", type=float, default=0.8)
     parser.add_argument("--max-tokens", type=int, default=800)
+    parser.add_argument("--lang", choices=["en", "ko"], default="en", help="Prompt language (en or ko).")
     args = parser.parse_args()
 
     # Load key
@@ -327,7 +389,13 @@ def main():
             # Call model with retry/backoff
             for attempt in range(4):
                 try:
-                    raw = call_model(client, args.model, pers, questions, temperature=args.temperature, seed=rnd.randrange(1<<30), max_tokens=args.max_tokens)
+                    raw = call_model(
+                        client, args.model, pers, questions,
+                        temperature=args.temperature,
+                        seed=rnd.randrange(1<<30),
+                        max_tokens=args.max_tokens,
+                        lang=args.lang,  # ⬅ 전달
+                    )
                     break
                 except Exception as e:
                     wait = 1.5 * (attempt + 1)
