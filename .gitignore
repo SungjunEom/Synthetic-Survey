@@ -1,2 +1,8 @@
 api_key.txt
+.env
 out/
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.coverage

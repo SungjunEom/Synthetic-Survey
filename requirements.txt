@@ -1,6 +1,5 @@
-openai>=1.30.0
-pyyaml>=6.0.1
-pydantic>=2.6.0
-pandas>=2.2.0
-tqdm>=4.66.0
-datasets
+openai>=1.54.0,<3
+PyYAML>=6.0.1,<7
+pydantic>=2.6.0,<3
+datasets>=2.19.0,<6
+huggingface-hub>=0.23.0,<2

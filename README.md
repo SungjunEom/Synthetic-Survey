@@ -1,183 +1,208 @@
-# Synthetic Survey (OpenAI Chat API, Python)
+# Synthetic Survey
 
-This project runs a **synthetic survey** by asking OpenAI's LLMs to role-play survey respondents with configurable or dataset-grounded demographics. 
+Run synthetic survey experiments with pre-constructed, demographically grounded South Korean personas from [NVIDIA Nemotron-Personas-Korea](https://huggingface.co/datasets/nvidia/Nemotron-Personas-Korea). An OpenAI model answers a validated questionnaire as each sampled persona. Every source field—including the travel, family, food, sports, and arts narratives—is supplied to the model.
 
-It supports both generating randomized custom personas and loading real-world census-grounded South Korean personas from NVIDIA's large-scale dataset.
+The tool produces **synthetic model responses, not measured human opinions or population estimates**. Demographic grounding does not establish behavioral validity. Use results to explore hypotheses and test questionnaires; compare them with human survey data before drawing substantive conclusions. NVIDIA documents independence assumptions and missing interactions in the source dataset.
 
----
+## Install
 
-## 🌟 Key Features
-
-*   **Dual Persona Modes:**
-    *   **Custom / Randomized Mode:** Generate personas on-the-fly specifying MBTI, age, sex, nationality, education, and political orientation.
-    *   **South Korea Census Mode:** Ground your survey using high-fidelity personas from NVIDIA's [nvidia/Nemotron-Personas-Korea](https://huggingface.co/datasets/nvidia/Nemotron-Personas-Korea) dataset.
-*   **Rich Roleplay Context:** When using the South Korean dataset, the models are fed detailed profiles containing occupation, cultural background, marital status, housing details, hobbies, and career goals.
-*   **Localized Prompting:** Fully supports prompting and response evaluation in both English and Korean (`--lang ko`).
-*   **Robust Execution:** Automatically validates LLM responses against a strict JSON schema, implements exponential backoff/retry, and supports reproducible runs via a random seed (`--seed`).
-*   **Clean Outputs:** Saves survey responses as flattened **CSV** and structured **JSONL** files inside an `./out/` directory, automatically dynamically including any attributes unique to the persona.
-
-> [!WARNING]
-> Synthetic surveys represent language model priors, not real human responses. These results should be checked carefully against real human data. For details on potential biases, refer to: *"Synthetic Replacements for Human Survey Data? The Perils of Large Language Models"* by Bisbee, et al.
-
----
-
-## 🚀 Installation & Setup
-
-1.  **Clone the Repository & Install Dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-2.  **Configure your OpenAI API Key:**
-    Export it as an environment variable:
-    ```bash
-    export OPENAI_API_KEY="your-api-key-here"
-    ```
-    *Alternatively, you can save it as a single-line plaintext file named `api_key.txt` in the root of the project.*
-
----
-
-## 📖 Command-Line Usage
-
-### 1. South Korea Census Mode (`--nemotron-korea`)
-Use NVIDIA's synthetic South Korean population to back your survey. This mode loads the [nvidia/Nemotron-Personas-Korea](https://huggingface.co/datasets/nvidia/Nemotron-Personas-Korea) dataset.
-
-#### Dataset Columns
-
-The dataset contains the following columns for each persona:
-
-*   **Structured Demographics & Location:**
-    *   `uuid`: Unique identifier for the persona.
-    *   `age`: Integer age (adults aged 19 and older).
-    *   `sex`: Biological sex (`"남자"` or `"여자"`).
-    *   `marital_status`: Marital status (e.g. `"배우자있음"`, `"미혼"`, `"사별"`, `"이혼"`).
-    *   `military_status`: Military status (e.g. `"비현역"`).
-    *   `family_type`: Family size/structure (e.g. `"배우자와 거주"`, `"배우자·자녀와 거주"`).
-    *   `housing_type`: Housing type (e.g. `"아파트"`, `"단독주택"`).
-    *   `education_level`: Education attainment (e.g. `"고등학교"`, `"4년제 대학교"`, `"대학원"`).
-    *   `bachelors_field`: Academic major field (if college-educated).
-    *   `occupation`: Specific job role or profession.
-    *   `province` / `district`: Province and local district (e.g. `"광주"` / `"광주-서구"`).
-    *   `country`: Country of residence (always `"대한민국"`).
-*   **Narrative Persona Facets:**
-    *   `persona`: Baseline textual summary of the persona.
-    *   `cultural_background`: Regional dialects, regional values, and generational details.
-    *   `professional_persona`: Detailed workplace dynamics and professional context.
-    *   `career_goals_and_ambitions`: Narrative detailing career drive and financial goals.
-    *   `skills_and_expertise` / `skills_and_expertise_list`: Overview and list of professional capabilities.
-    *   `hobbies_and_interests` / `hobbies_and_interests_list`: Overview and list of leisure interests.
-    *   `sports_persona` / `arts_persona` / `travel_persona` / `culinary_persona` / `family_persona`: Detailed behavioral facets.
+Python 3.10+ on macOS or Linux (run locking uses `fcntl`).
 
 ```bash
-# Run a survey of 10 South Korean personas with Korean prompts
-python synthetic_survey.py --nemotron-korea --n 10 --lang ko
-
-# Filter the dataset by sex and age range, and assign a political stance
-python synthetic_survey.py --nemotron-korea --n 15 --sex female --age 25-40 --politics "진보" --lang ko
-
-# Filter by occupation, marital status, and province (supports English mapping & substring matching)
-python synthetic_survey.py --nemotron-korea --n 5 \
-  --sex male \
-  --marital-status married \
-  --province "서울" \
-  --occupation "개발자" \
-  --lang ko
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-*Note: The first run of `--nemotron-korea` will download and cache the 2.0GB dataset from Hugging Face. Subsequent runs will load instantly from cache.*
+For model calls, set `OPENAI_API_KEY` in your environment, or put it in the git-ignored `api_key.txt`. `--api-key-file PATH` selects another file; the environment takes precedence. Credentials are never included in run artifacts. You do not need a key for planning, summaries, or tests.
 
-#### Nemotron Option Compatibility
+## Try it without an API call or dataset download
 
-When running with `--nemotron-korea`, some command-line options behave differently or are ignored:
-
-| Option | Supported? | Details / Behavior in Nemotron Mode |
-| :--- | :--- | :--- |
-| `--n` | **Yes** | Determines how many personas to sample from the dataset. |
-| `--age` | **Yes** | Filters the dataset by age (supports single integers or ranges, e.g., `25-40`). |
-| `--sex` | **Yes** | Filters the dataset by sex. Maps `male` to `"남자"`, `female` to `"여자"`, and `non-binary` to `"남자"`. |
-| `--education`| **Yes** | Filters the dataset by education level. Maps English levels (e.g. `Bachelor's`) to Korean levels (e.g. `4년제 대학교`). |
-| `--politics` | **Yes** | Manually sets a political stance on the sampled personas (since politics is not present in the dataset columns). |
-| `--randomize`| **Yes** | If specified, randomly assigns a political stance (`진보` / `보수`) to personas when `--politics` is omitted. |
-| `--seed` | **Yes** | Ensures deterministic, reproducible sampling from the dataset. |
-| `--marital-status` | **Yes** | Filters the dataset by marital status. Maps English (e.g. `married`, `single`) to Korean values (e.g. `배우자있음`, `미혼`). |
-| `--housing-type` | **Yes** | Filters the dataset by housing type. Maps English (e.g. `apartment`, `house`) to Korean values (e.g. `아파트`, `단독주택`). |
-| `--occupation`| **Yes** | Filters by occupation using a case-insensitive substring search (e.g. `개발자` or `회사원`). |
-| `--province` | **Yes** | Filters by province using a case-insensitive substring search (e.g. `서울` or `광주`). |
-| `--district` | **Yes** | Filters by district using a case-insensitive substring search (e.g. `서구` or `강남구`). |
-| `--mbti` | **No** | *Ignored.* Nemotron personas do not include MBTI traits. |
-| `--nationality`| **No** | *Ignored.* Nationality is always fixed to `"South Korea"`. |
-
-### 2. Custom / Randomized Persona Mode
-Generate personas dynamically by specifying constraints.
+The three bundled personas are **handwritten test fixtures**, not a sample of NVIDIA's population.
 
 ```bash
-# Generate 50 randomized personas across different nationalities
-python synthetic_survey.py --n 50 --randomize
-
-# Force a specific persona profile for everyone
-python synthetic_survey.py --n 5 \
-  --mbti INTP --age 29 --sex female \
-  --nationality "United States" --education "Bachelor's" \
-  --politics Democrat
-
-# Constraint mix: set some properties, randomize the rest
-python synthetic_survey.py --n 20 --randomize --nationality "South Korea" --politics 진보
+python synthetic_survey.py --n 3 \
+  --personas-file examples/personas.jsonl \
+  --seed 42 --survey-date 2026-10-07 \
+  --dry-run --run-dir out/demo
 ```
 
-### 3. Customizing the Questionnaire
-You can define your questions in a YAML or JSON file. By default, the script loads `questions.yaml`.
+Inspect `out/demo/manifest.json` and `out/demo/cohort.json`. The latter contains each persona and the exact messages that will be sent. A dry run creates a new immutable experiment plan, with all respondents marked pending. It does not fabricate answers.
+
+Execute that plan after configuring your key:
 
 ```bash
-python synthetic_survey.py --n 10 --questions-file my_questions.yaml
+python synthetic_survey.py --resume out/demo
 ```
 
----
+## Survey the Nemotron population
 
-## 🛠️ Command-Line Arguments Reference
+Nemotron is the default source; `--nemotron-korea` remains a supported explicit alias. The first real dataset load downloads and caches the source through Hugging Face. It can require substantial disk space and time; cached loads and filtering still involve work.
 
-| Option | Type | Description |
-| :--- | :--- | :--- |
-| `--n` | `int` | **Required.** Number of synthetic respondents to generate. |
-| `--nemotron-korea` | `flag` | Use NVIDIA's South Korean persona dataset instead of random generation. |
-| `--lang` | `ko` \| `en` | Prompt language (`en` or `ko`). Default is `en`. |
-| `--questions-file` | `str` | Path to the YAML/JSON questions file (default: `questions.yaml`). |
-| `--api-key-file` | `str` | Path to your API key file (default: `api_key.txt`). |
-| `--model` | `str` | OpenAI Chat model to use (default: `gpt-4o-mini`). |
-| `--randomize` | `flag` | Randomize unspecified persona fields for each respondent (politics in Nemotron mode). |
-| `--seed` | `int` | Random seed for reproducibility. |
-| `--age` | `str` | Age filter. Can be an integer (e.g. `30`) or range (e.g. `25-40`). |
-| `--sex` | `str` | Sex filter (`male`, `female`, or `non-binary` / `"남자"`, `"여자"`). |
-| `--education` | `str` | Education level filter (e.g. `Bachelor's` / `4년제 대학교`). |
-| `--politics` | `str` | Political orientation filter (e.g. `Democrat` / `진보`). |
-| `--marital-status`| `str` | **Nemotron Mode Only.** Marital status filter (e.g. `married`, `single`, `widowed`, `divorced` or Korean). |
-| `--housing-type` | `str` | **Nemotron Mode Only.** Housing type filter (e.g. `apartment`, `villa`, `house` or Korean). |
-| `--occupation` | `str` | **Nemotron Mode Only.** Occupation substring filter (e.g. `개발자`). |
-| `--province` | `str` | **Nemotron Mode Only.** Province substring filter (e.g. `서울`). |
-| `--district` | `str` | **Nemotron Mode Only.** Local district substring filter (e.g. `강남구`). |
-| `--temperature` | `float` | Sampling temperature for the model (default: `0.8`). |
+```bash
+# Korean questionnaire and prompts are the default.
+python synthetic_survey.py --nemotron-korea --n 100 --seed 42
 
----
+# Inspect a filtered cohort before making model calls.
+python synthetic_survey.py --n 20 --sex 여자 --age 25-40 \
+  --province 서울 --education "Bachelor's" \
+  --seed 42 --dry-run --run-dir out/seoul-women
 
-## 📁 Repository Layout
-
-```
-synthetic-survey/
-├── synthetic_survey.py  # Main execution script
-├── questions.yaml       # Default survey questions
-├── requirements.txt     # Python dependencies
-├── api_key.txt          # API Key storage (optional)
-└── out/                 # CSV and JSONL survey outputs
+# An English-language experiment uses questions.yaml by default.
+python synthetic_survey.py --n 10 --lang en --seed 42
 ```
 
----
+Sampling is uniform over eligible **rows**, without replacement by default. It is not stratified or weighted. Filtering defines a subgroup; its results must not be interpreted as national estimates. The loader filters Arrow-backed demographic columns and materializes only sampled records, rather than converting all narrative columns to pandas.
 
-## 📚 References
+The dataset's mutable revision (default `main`) is resolved to a commit **before** loading and saved in the manifest. Use `--dataset-revision COMMIT` to repeat a particular source version. Local JSON/JSONL input must use Nemotron field names; its file hash and path are recorded. Required fields are `uuid`, `age`, `sex`, `education_level`, and `persona`, plus any fields used by your filters. Ages 19–120 are accepted without excluding the dataset's oldest adults. Records are validated before any model calls.
 
-If you use the South Korea persona dataset in your research or application, please reference the official work:
+### Filters and experimental overrides
 
-> Kim, H., Ryu, J., Lee, J., Ryu, H., Praveen, K., Prayaga, S., Thadaka, K., Jennings, W., Sadeghi, B., Sharabiani, A., Choi, Y., & Meyer, Y. (2024). *Nemotron-Personas-Korea*. NVIDIA. Hugging Face Dataset: [nvidia/Nemotron-Personas-Korea](https://huggingface.co/datasets/nvidia/Nemotron-Personas-Korea)
+| Argument | Behavior |
+| --- | --- |
+| `--age 30` / `--age 25-40` | Exact age or inclusive ascending range; invalid ranges are rejected, not clamped |
+| `--sex male` / `female` / `남자` / `여자` | Exact source sex category; non-binary is unavailable and explicitly rejected in Nemotron mode |
+| `--education` | Korean categories including `무학`, `초등학교`, `중학교`, `고등학교`, `2~3년제 전문대학`, `4년제 대학교`, `대학원`; English aliases also supported |
+| `--marital-status` | Korean value or `married`, `single`, `unmarried`, `widowed`, `divorced` |
+| `--housing-type` | Korean value or `apartment`, `villa`, `multi-family`, `house`, `single-family` |
+| `--occupation`, `--province`, `--district` | Literal, case-insensitive substrings; never regular expressions |
+| `--politics TEXT` | Assign the same explicit experimental political orientation to each persona; not a population filter |
+| `--with-replacement` | Sample with replacement explicitly; unique-persona counts are reported |
 
----
+English education aliases are `High school`, `Associate's`, `Bachelor's`, `Master's`, and `Doctorate`. The last two both select `대학원`; the dataset does not distinguish those degrees in this field. The source sex field is not a gender-identity measure.
 
-## 📄 License
-This project is licensed under the MIT License.
+No political orientation is randomly invented. An omitted orientation stays unspecified. Political overrides are saved separately from the original source fields so their experimental origin is visible. Repeated draws of the same persona are identifiable by the retained source UUID and must not be treated as independent human respondents.
+
+## Questionnaires
+
+The defaults are `questions.ko.yaml` for Korean and `questions.yaml` for English. `--questions-file PATH` accepts YAML or JSON, either a list or an object containing only a `questions` list. Custom question and option text is used verbatim; `--lang` does not translate it.
+
+```yaml
+questions:
+  - id: satisfaction
+    text: "현재 삶에 얼마나 만족하십니까? (0~10)"
+    type: scale
+    minimum: 0
+    maximum: 10
+  - id: priorities
+    text: "중요한 분야를 최대 두 개 선택하세요."
+    type: multi
+    options: ["교육", "보건의료", "환경"]
+    min_choices: 1
+    max_choices: 2
+  - id: trips
+    text: "지난 12개월 동안 해외여행을 몇 번 다녀오셨습니까?"
+    type: number
+    minimum: 0
+    allow_na: true
+```
+
+| Type | Validation |
+| --- | --- |
+| `free` | Nonblank string |
+| `single` | One exact option string |
+| `multi` | Unique option strings; default minimum 1, maximum the smaller of 3 or the number of options |
+| `scale` | Integer within bounds, default 1–5; booleans and strings are rejected |
+| `number` | Finite numeric value within optional bounds; booleans are rejected |
+
+IDs must be unique and begin with a letter, followed by letters, digits, underscores or hyphens, up to 64 characters. Unknown fields and invalid definitions fail before model calls. `allow_na: true` permits JSON `null`; otherwise every question requires a typed answer. Literal `N/A` is not a universal escape from validation. Missing answers, extra IDs, duplicate JSON keys, invalid options and duplicate multi-select selections are rejected.
+
+The API receives a per-question [Structured Outputs schema](https://developers.openai.com/api/docs/guides/structured-outputs). Local validation independently checks the returned JSON before a response is marked successful. The model returns answers keyed by ID; original question text and demographic data are attached by the program, not regenerated by the model.
+
+## Execution, recovery, and reproducibility
+
+```bash
+# Resume only pending respondents; successful and failed respondents are skipped.
+python synthetic_survey.py --resume out/seoul-women
+
+# Explicitly give failed respondents another attempt budget, preserving earlier history.
+python synthetic_survey.py --resume out/seoul-women --retry-failed
+
+# Rebuild CSV/JSONL/summary files from durable records, without a key or network calls.
+python synthetic_survey.py --summarize out/seoul-women
+```
+
+- Every new run uses a unique directory, or a new directory supplied with `--run-dir`. Existing directories are never overwritten.
+- The plan freezes the cohort, exact prompts, question schema, survey date, source revision, settings, seeds, dependency versions and implementation hash. Checksums detect accidental edits. Resume rejects setting overrides and changed implementation code; use the original checkout to continue an experiment after code changes.
+- Each respondent has a full unique run ID and retains the source persona UUID. Request seeds are derived independently per respondent and attempt; a retry does not shift later respondents' seeds.
+- Completed attempts are atomically saved, including response content, model identifier, token usage, request ID and system fingerprint when provided. CSV/JSONL exports are derived from these records and can be rebuilt.
+- Invalid answers, truncated output, connection failures and transient HTTP errors receive bounded exponential-backoff retries. Refusals are recorded as failures without automatic retry. Non-transient HTTP errors stop the run, preserving unattempted respondents as pending. The SDK's hidden retries are disabled.
+- Exhausted respondents are retained as failures and are not replaced with new people. Summaries show planned, successful and failed demographic distributions so attrition is visible.
+- A process lock prevents concurrent execution of the same run. An interrupted, uncommitted API request may be repeated on resume; this is not an exactly-once billing guarantee.
+- A seed makes local sampling reproducible for the same source and software environment. Model output is not guaranteed to be identical, even with a request seed and model snapshot. The tool saves provenance rather than promising deterministic model behavior.
+
+Exit codes: `0` for completed execution/planning/summarization, `1` for a run with failed or pending respondents, `2` for input/artifact errors, and `130` for interruption.
+
+### Model and runtime options
+
+| Argument | Default / meaning |
+| --- | --- |
+| `--model` | `OPENAI_MODEL`, or `gpt-4o-mini-2024-07-18`; use a Chat Completions model that supports strict structured output |
+| `--temperature` | `0.8`; pass `default` to omit the parameter for models that do not support it |
+| `--no-model-seed` | Omit the optional API seed for models that do not support it; sampling still uses the saved seed |
+| `--max-tokens` | `4096` completion-token budget; increase for long questionnaires or models using reasoning tokens |
+| `--max-attempts` | `3` per respondent; interrupted pending work retains the remaining budget |
+| `--timeout` | `90` seconds per API request |
+| `--seed` | Generated and saved if omitted |
+| `--survey-date` | Local current date in ISO format; fixes the reference date for relative questions, not the model's knowledge freshness |
+| `--out-dir` | `out` parent directory |
+
+Incompatible model parameters fail visibly; the program does not silently switch models or downgrade validation. Requests are sequential. Large surveys should first be piloted to check context length, token budget, cost, refusals, and answer distributions.
+
+## Outputs
+
+```text
+out/run-.../
+  manifest.json       # Immutable experiment definition and provenance
+  cohort.json         # All sampled personas, exact messages and request seeds
+  records/<id>.json   # Durable per-respondent status and attempt history
+  respondents.csv     # One row per planned respondent, including failures/pending
+  answers.csv         # One row per validated answer; lists encoded as JSON
+  results.jsonl       # Successful responses with full persona context and metadata
+  summary.json        # Completion, unique-persona, demographic and answer summaries
+```
+
+CSV text is written verbatim; JSONL retains native value types. Null answers are blank in CSV and marked with `is_na`. Demographic summaries count respondents once, not once per answer. Question summaries report denominators explicitly; multi-select counts are selection counts, and numeric means exclude null answers. There are no population weights, confidence intervals, or claims of representativeness. Free-text answers are retained without automated interpretation.
+
+## Custom persona experiments
+
+Custom mode is a convenience for controlled hypothetical profiles, not a demographic population generator.
+
+```bash
+python synthetic_survey.py --custom --n 5 --age 29 --sex female \
+  --nationality "South Korea" --education "Bachelor's" --mbti INTP \
+  --politics 진보 --seed 42
+
+python synthetic_survey.py --custom --n 20 --randomize --seed 42 --dry-run
+```
+
+Without `--randomize`, all draws share a fixed profile (including one sampled age when a range is given). Defaults are age 35, female, South Korea, university education, unspecified MBTI and politics. With `--randomize`, unspecified age, sex, education and MBTI vary independently; nationality defaults to South Korea and politics remains unspecified. These arbitrary distributions are not calibrated to census data.
+
+## Tests and layout
+
+```bash
+python -m unittest discover -v
+```
+
+Tests use small Arrow datasets, fixtures and a mocked HTTP transport through the real OpenAI SDK. They make no paid API calls and do not download the Nemotron dataset. CI runs on Python 3.10 and 3.12.
+
+```text
+synthetic_survey.py   # CLI entry point
+survey/
+  cli.py             # Arguments and experiment orchestration
+  personas.py        # Source loading, filters, sampling and persona validation
+  questions.py       # Questionnaire/schema/answer validation
+  prompts.py         # Korean/English prompt rendering
+  provider.py        # OpenAI adapter and error classification
+  runner.py          # Planning, retries and resumable execution
+  storage.py         # Atomic artifacts, locking, exports and summaries
+questions*.yaml       # English and Korean questionnaires
+examples/             # Handwritten offline fixtures
+tests/                # Offline regression and integration tests
+```
+
+### Migration from the original script
+
+Nemotron and Korean are now defaults; custom generation requires `--custom`. `--randomize` applies only to custom profiles and no longer assigns random politics to Nemotron personas. Existing `--n`, filtering, model, seed and questionnaire options remain where compatible. Output files now live in per-run directories; old result files are left untouched and cannot be resumed as v2 runs. Legacy model-shaped `answers` arrays are replaced internally by an ID-keyed object, while exported JSONL retains an answer array with original question text.
+
+The persona dataset remains subject to its own [CC BY 4.0 attribution and dataset documentation](https://huggingface.co/datasets/nvidia/Nemotron-Personas-Korea). Cite the exact dataset revision used in an experiment.
